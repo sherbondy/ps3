@@ -15,6 +15,7 @@
    "TACTTAACACCCTGTCAA"])
 
 (def bases "ATGC")
+(def uniform-bases {\A 0.25 \T 0.25 \C 0.25 \G 0.25})
 
 (defn remove-nth [v n]
   (vec (keep-indexed
@@ -33,6 +34,8 @@
 
 ;; (str (get-in seqs [0 0]))
 
+
+
 (defn freq-dist
   "Returns the proportionate frequency distribution
    over the elements in a sequence. E.g.
@@ -45,7 +48,21 @@
            (fn [[k v]] {k (/ v fcount)})
            (frequencies v)))))
 
+(defn pfreq-dist
+  "Freq distribution with pseudocounts"
+  [v]
+  (let [o-dist (freq-dist v)
+        pseudo 0.01
+        fcount (float (count v))]
+    (into {}
+          (for [base bases]
+            (let [o-freq (get o-dist base 0.0)]
+              {base (/ (+ o-freq pseudo)
+                       (+ 1 (* pseudo fcount)))})))))
+
+;; (pfreq-dist "TCCGGCCC")
 ;; ((freq-dist "ATGCC") (nth bases 1))
+;; (reduce + (vals (freq-dist "ATGCC")))
 ;; (freq-dist (map #(nth % 0) (subseqs seqs 8)))
 
 (defn make-profile [subseqs size bases]
@@ -53,10 +70,10 @@
   (let [arr (make-array Float/TYPE 4 size)
         bcount (count bases)]
     (doseq [i (range size)]
-      (let [freqs (freq-dist (map #(nth % i) subseqs))]
+      (let [freqs (pfreq-dist (map #(nth % i) subseqs))]
         (doseq [j (range bcount)]
           (aset-float arr j i
-                      (get freqs (nth bases j) 0.0))
+                      (get freqs (nth bases j)))
       )))
     arr))
 
@@ -71,7 +88,7 @@
 
 ;; (bi \T) => 1
 
-(defn lmer-prob [lmer profile]
+(defn lmer-prob [lmer profile bkgd]
   (reduce * (map-indexed (fn [i base]
                            (get-in profile [(bi base) i]))
                          lmer)))
@@ -83,10 +100,8 @@
   (reduce + (for [j (range len)]
               (reduce + (for [r bases]
                           (let [p-rj (get-in profile [(bi r) j])]
-                            (if (> p-rj 0.0)
-                              (* p-rj (log2 (/ p-rj (bkgd r))))
-                              0.0)))))))
-
+                            (* p-rj (log2 (/ p-rj (bkgd r))))))))))
+                            
 ;; from http://rosettacode.org/wiki/Probabilistic_choice#Clojure
 (defn to-cdf [pdf]
   (reduce
@@ -105,8 +120,8 @@
         rand-f     (rand (last prob-cdf))]
     (count (filter #(< % rand-f) prob-cdf))))
 
-(defn rank-lmers [lmers profile & [bkgd]]
-  (let [probs      (map #(lmer-prob % profile) lmers)
+(defn rank-lmers [lmers profile bkgd]
+  (let [probs      (map #(lmer-prob % profile bkgd) lmers)
         nonzeros   (filter #(not= % 0.0) probs)
         max-prob   (apply max probs)
         min-prob   (if (not (zero? (count nonzeros)))
@@ -123,14 +138,12 @@
               (to-array-2d [[0.5 0.5 0.5]
                             [0.0 0.5 0.0]
                             [0.0 0.0 0.5]
-                            [0.5 0.0 0.0]])))
+                            [0.5 0.0 0.0]]) uniform-bases))
 
 ;; it works well
 (frequencies
  (for [i (range 10000)]
    (test-ranker)))
-
-
 
 (defn rel-profile-entropies [len ss bkgd]
   (for [i (range (count ss))]
@@ -152,7 +165,8 @@
         new-ss      (remove-nth ss removed-idx)
         profile     (make-profile new-ss len bases)
         [new-start max-prob] (rank-lmers (l-mers removed-seq len)
-                                         profile)
+                                         profile
+                                         bkgd)
         added-ss    (l-mer removed-seq new-start len)]
     ;;(pprint new-ss)
     ;;(pprint profile)
@@ -165,8 +179,6 @@
      (reduce conj (conj (subvec ss 0 removed-idx)
                         added-ss)
              (subvec ss (inc removed-idx)))]))
-
-(def uniform-bases {\A 0.25 \T 0.25 \C 0.25 \G 0.25})
 
 ;; Idea: stop iterating once we've gone cutoff rounds
 ;; without seeing an increase in max-prob
@@ -192,9 +204,10 @@
 ;; (gibbs seqs 8 50)
 ;; {:best-p 0.005859375, :best-ss ["TAAACAAT" "AAATTTAC" "GTACTGTC" "TAAACGAC" "TTAACACC"]}
 
-(defn most-frequent-results [test-results]
-  (take 5 (sort-by (fn [[k v]] (* -1 v))
-                   (frequencies (flatten (map #(:best-ss %) test-results))))))
+(defn most-frequent-results [test-results & [n]]
+  (let [n (if n n 5)]
+    (take n (sort-by (fn [[k v]] (* -1 v))
+                     (frequencies (flatten (map #(:best-ss %) test-results)))))))
 
 
 ;; Repeat gibbs with reps seeds: returns the sorted results
@@ -252,27 +265,19 @@
 ;; For 3 and 4 simply trying to maximize P is insufficient.
 ;; The results are skewed in favor of A/T repeats
 
-(test-data 3 10)
-;; {:best-p 0.13362902483849626, :best-ss ["AAAAGAAAAA" "AAAAAAAAAA" "AGAGGAAGAA" "AAAAAATAAA" "AAAAGAAAAT" "AACAGAAAAT" "AAAAATGAAA" "AAAAAAAAAA" "AGAAAAGAAA" "AAAAATTTAA" "AAAAAAAAAA" "AAAAAAAAAG" "AAAAGAGAAG" "AAAGAAAGAG" "AGAAGAAAAG" "AAAGATTATA" "AAAAATTTAA" "AAAAAAATAA" "AAAAAAAAAG" "AAAAATAGTA" "AAAAAAAATA" "AAAAAAAAAA" "AAAAAAAGAA" "AAAAGAATAA" "AAAAAAAAAA" "AAAAAAGAAG" "AAAAGAAAAA" "AAAAATATAA" "AAAGAAGGAA" "AGCAAAGAAT" "AAAAGAAAAA" "AAAAAAAAAA" "AGAAGAAAAA" "AAAAAAAAAA"]}
-;; {:best-p 0.1148695910789486, :best-ss ["AAAAAAGAAA" "AAAAAAAAAA" "AAAGGAGGAA" "AAAAAATAAA" "AAAAAAAAAG" "TAAGAATAAA" "TAAAAATGAA" "AAAAAAAAAA" "TAAAGATAAA" "AAGTAATCCG" "TAAAAAAAAA" "AAAAACAAAA" "AAAAGAGAAG" "AAAGAAAGAG" "AGAAGAAAAG" "AAAGGGAGAA" "AAATGAAAAA" "AAAAAATAAA" "AAAAAAAAAG" "AAATAGTAAA" "AAAAAAAATA" "AAAAAAAAAA" "AAAAAAAGAA" "TGATAAAAAA" "AAAAAAAAAA" "AAAAAAGAAG" "AAAAAGAAAA" "AAGAAGAAAA" "AAAGAAGGAA" "AAAAACCAAA" "AAAAAGAAAA" "AAAAAAGAAA" "AAAAGAAGAA" "AAAAAAAAAA"]}
-;; {:best-p 0.11364343620251935, :best-ss ["AGGAAAAAAT" "AAAAAAAAAA" "AGGAACAAAT" "AGAAAAAATA" "AAAAAAAAGA" "AAGAATAAAA" "AAAATGAAAT" "AAAAAAAAAA" "AGAAAAGAAA" "TGAAAAATTT" "AAAAAAATAA" "AAAATAATAA" "AGAAAAGAGA" "AAGAATATAA" "AGAATAAAAA" "AGAATAGTTA" "AAAATGAAAA" "AAAAAAATAA" "AAAAAAAAAA" "AAGAATAAAA" "AAAAAAAATA" "AAAAAAAAAA" "AAAATAAATA" "TAAAAAGAAT" "AAAAAAAAAA" "AAAAAGAAGA" "AAAAAGAAAA" "AAAAATATAA" "AAAATAGTAA" "AATATAAATA" "AAAAAGAAAA" "AAAAAAAAAA" "TAGAAAAAAA" "AAAAAAAAAA"]}
-;; {:best-p 0.11359138357654087, :best-ss ["AAAAAAAGAA" "AAAAAAAAAG" "AAGGATAGAA" "AAATAAATAA" "CAAAAAAAAA" "AAGAATAAAA" "AAAAATGAAA" "GAAAAAAAAA" "AAGATAAAAA" "CCATGAAAAA" "AAAAAAAAAA" "CAATAAAAAA" "AAGAAAAGAG" "AAGAATATAA" "CAGAATAAAA" "AAGTAAGAAA" "CAAAATGAAA" "AAAAATAAAA" "AAAAAAAAAA" "AAGAATAAAA" "AAAACAAAAA" "CAAAAAAAAA" "AAGAAAAAAA" "AAGAATAAAA" "AAAACAAAAA" "GAAAAAAGAA" "GAAAAAGAAA" "AAAAATATAA" "AAAATTGAAA" "CGATTAAAAA" "AAAAAAGAAA" "AAAAAAAAAA" "AAGGAAAAAA" "AAAAAAAAAA"]}
-
-;; No good!
-
 (def low-gc-dist {\A 0.315 \T 0.315 \C 0.185 \G 0.185})
 (test-data 3 10 low-gc-dist)
-;; Still doesn't work well:
-;; {:best-p 11.52886007980086, :best-ss ["AAAAAAAGAA" "AAAAAAAGAA" "ATGAGTGGAA" "AAAAATAGAA" "ATAAAAATAA" "AAGAATAAAA" "AAAAATGAAA" "AAAAAAAAAA" "AAGAAAAGAA" "AAAAATTTAA" "AAAAATAAAA" "AAAAAAAAAG" "AAGAAAAGAG" "AAGAATATAA" "AAGAAAAGAG" "AAGTAAGAAA" "AAAAATTTAA" "AAAAAATAAA" "AAAAAAAAAA" "AAGAATAAAA" "AAAAAAATAG" "AAAAAAAAAA" "AAAAAAAGAA" "AAAAGAATAA" "AAAAAAAAAA" "AAAAAAGAAG" "AAGAAAAAAG" "AAAAATATAA" "AAAAATTGAA" "ATAAATATAA" "AAAAAAGAAA" "AAAAAAAAAA" "AAAAGAAGAA" "AAAAAAAAAA"]}
-;; {:best-p 11.371393724675492, :best-ss ["AAAAAAGAAA" "AAAAAAAAGA" "AAAGGATAGA" "AAAAAATAAA" "AAAAAAAAGA" "AGATAAGAAA" "AAAAAATTAA" "AGAAAAAAGA" "AGAAAAGAAA" "CCATGAAAAA" "AAAAAATAAA" "AGAAAAATAA" "AAAGAAAAGA" "AAAAGAAAGA" "AGAAAAGAGA" "AATGGAAAAA" "AAATGAAAAA" "AAAAAATAAA" "AAAAAAAAGA" "AGTAAAAAGA" "AAAACAAAAA" "AAAAGAATAA" "AAAAAAATAA" "AAAAGAATAA" "AAAAAAAAAA" "AGAAGAGAAA" "AAAGAAAAAA" "AGAAGAAAAA" "AAAGAAGGAA" "AAAGCAAAGA" "AAAAGAAAAA" "AAAAAAAAAA" "AAAGAAGAAA" "AAAAAAAAAA"]}
-;; {:best-p 11.327796258009817, :best-ss ["AAAAAGAAAA" "AAAAAAAAAA" "AAAGTGAGAA" "GAAAAAATAA" "AAAAAGATAA" "AAGAATAAAA" "AAAAAAATTA" "AAAAAAAAAA" "AAGATAAAAA" "GAAAAATTTA" "AAAAAAATAA" "AATAAAAAAA" "GAAAAGAGAA" "AAGAATATAA" "GAAAAGAGAA" "AAAGATTATA" "AAAATGAAAA" "AAAATAAAAA" "AAAAAAAAAA" "AAGAATAAAA" "AAAAAAAATA" "AAAAAAAAAA" "AAAAAAAGAA" "AAAAAGAATA" "AAAAAAAAAA" "GAAAAAAGAA" "AAAAAGAAAA" "AAGAAGAAAA" "AAAAATAGTA" "AATATAAATA" "AAAAAGAAAA" "AAAAAGAAAA" "GAAAAAAGAA" "AAAAAAAAAA"]}
-;; {:best-p 11.238083345541527, :best-ss ["AAAAGTAAAA" "AAAAAAAAAA" "TAGCGAAAAA" "TAGAGAAAAA" "ACAAAAAAAA" "AAGAATAAAA" "AAGAGAACAA" "AAAAAAAAAA" "AAGATAAAAA" "AAAAATTTAA" "AAAAAAAAAA" "TAAAAAAAAA" "TCAAAGAAAA" "AAGAATATAA" "CAGAATAAAA" "CAGAGAAAAA" "TATAATAAAA" "AAAATAAAAA" "AAAAAAAAAA" "AAGAATAAAA" "AAAAAAAATA" "AAAAAAAAAA" "AAGAAAAAAA" "AAGAATAAAA" "TAAAAAAAAA" "AAGAGAAATA" "AAAAGAAAAA" "AAGAAGAAAA" "AAACGTTTAA" "AAGAATACAA" "AAAAGAAAAA" "AAAAAAAAAA" "TAGAAAAAAA" "AAAAAAAAAA"]}
+;; Still doesn't work very well:
+;; {:best-p 0.1289751937490981, :best-ss ["AAAAGAAAAA" "AAAAAAAAAA" "AAAGGATAGA" "AAAAAATAAA" "CAAAAAAAAA" "ATAATAACAA" "AAAAAATTAA" "AAAAAAAAAA" "AAAGATAAAA" "AAAAATTTAA" "AAAAAAAAAA" "ATAAAAAAAA" "AAAGAAAAGA" "AAAAGAAAGA" "ATAGAAGAAA" "AAAAATGCAA" "CAAAATGAAA" "AAAAAAATAA" "AAAAAAAAAA" "CAAGAATAAA" "AAAAAATAGA" "AAAAGAATAA" "CAAAAAGAAA" "AAAGAATAAA" "AAAAAAAAAA" "AAAGAAGAGA" "AAAGAAAAAA" "AAAAATATAA" "AAAATAGTAA" "ATAAATATAA" "AAAAAAGAAA" "AAAAAAGAAA" "ATAGAAAAAA" "AAAAAAAAAA"]}
+;; {:best-p 0.11381719298139799, :best-ss ["AAAAAAGAAA" "AAAAAAAAAA" "GATAATACAA" "AAAAAATAAA" "AATAAAAAAA" "AATAAAAAAC" "AAATAATCAA" "AAAGAAAAAA" "AAAGATAAAA" "AAAATTTAAC" "AAAAAAAAAA" "AATAAAAAAA" "AAAGAAAAGA" "TATATATAAA" "ACTTAATAAC" "AAAAATGCAA" "TATAATAAAA" "AAAAAATAAA" "AAAAAAAAAA" "AAATAAGAAC" "AAAAAAAATA" "AAAAAAAAAA" "AAAAAAGAAC" "AAAGAATAAA" "AAAAAAAAAA" "AAAGAAGAGA" "AAAGAAAAAA" "TAAAAATATA" "AAAATTGAAA" "AATATAAATA" "AAAAAAGAAA" "AAAAAAAAAA" "AAAGAAGAAA" "AAAAAAAAAA"]}
+;; {:best-p 0.11301851134502555, :best-ss ["AAAAAAGAAA" "AAAAAAGAAA" "CAAAGTGAGA" "AAAAAATAAA" "AAATAAAAAT" "ATAAGAATAA" "AGAAAAAAAT" "AAAAAAAAAA" "AGAAAAGAAA" "AAAAATTTAA" "AAAAAAACAA" "AAAAAAACAA" "AGAAAAGAGA" "AAAAGAAAGA" "AAAAGTAAGA" "AAAAATGCAA" "AAATGAAAAA" "AAAAAAATAA" "AAAAAAAAAA" "AATAGTAAAA" "AAAAAATAGA" "AAAAAAAAAA" "AAAAAAATAA" "AAAAGTTAAA" "AAAAAAAAAT" "AGAAGAGAAA" "AAAAGAAAAA" "AAAAATATAA" "AATAATACAT" "ATAAATATAA" "AAAAAAGAAA" "AAAAAAAAAA" "AGAAGAAAAA" "AAAAAAAAAA"]}
+;; {:best-p 0.10731869081755462, :best-ss ["ATACAAAAAA" "AAAAAAAAAA" "AGGAAGAAAT" "AAAAAATAAA" "AAAAAGAAAA" "AATAAAAAAC" "AAAAAAATTA" "AAAAAGAAAA" "AAGATAAAAA" "ATGAAAAATT" "CAAAAAAAAT" "CTAAAAAAAA" "AAAAGATATC" "AAAAGAAAGA" "AAAAGAGAAC" "AGTAAGAAAC" "AAAAAGAATC" "AAAAATAAAA" "AAAAAAAAAA" "AAGAATAAAA" "AAACAAAAAT" "AAAAAAAAAA" "AAAAAGAAAC" "AAGAATAAAA" "AAAAAAAAAA" "AAAAAGAAGA" "AAAAAGAAAA" "AAAAAATATC" "AAGAAGGAAA" "AAAAACCAAA" "ACACAAAAAA" "AAAAAAAAAA" "AAAAAGAAGA" "AAAAAAAAAA"]}
 
+;; most-frequent-results on this data yields:
+;; ["AAAAAAAAAA" 78] ["TTTTTTTTTT" 19] ["AAAAAGAAAA" 19] ["AAAAAATAAA" 13] ["AAAAAAGAAA" 12] ["AAAAAAATAA" 9] ["AAAAAAAAAC" 7] ["AAGAATAAAA" 7] ["GAATAAAAAA" 7] ["AAAAATTTAA" 7]
 
 (test-data 4 10 low-gc-dist)
 ;; {:best-p 10.131471123522752, :best-ss ["TTTTTTTTTC" "TTTTTGTTTT" "TTTTTGCTTC" "TTTTTTTTTC" "TTTTTTTTTT" "TATTCTTTTT" "CTTTTTTTTT" "TTTTCTTTTT" "TACTCGTTTT" "TATTTTTTTT" "TTTTTTTTTT" "TTTTTACTTT" "CTTTTTTTTC" "TTCTTTTTTT" "TTTTTTGTTG" "CTTTTTCTAT" "TTTTTTTTAT" "CATTTATTTC" "TTTTTTTTTT" "TTATTTTTTT" "TTTTTTTTTT" "TACTTTCTTT" "CTTTTATTGT" "ATATCTTTTC" "TTTTCTTTTT" "TTTTTTCTTC" "TTCTTTCTAT" "TTTTTTCTTT" "TTTTCTGTTT" "TTTTTTTTTT" "CTATTTTTTC" "TTTTTTCTTC" "CTTTTTTTTC" "TTTTTATTTT" "TTTTTTCTTC" "TTTTCATTAT" "TATATTCTTG" "TACTTTCTTT" "TATTTTTTTC" "TTTTTTCTTC" "TTCACTCTTT" "TTTTCGGTTT" "TTTACTTTTG" "TATTTGCTTT" "TTTTTTTTTT" "CTTTTGTTTT" "CTATTGTTTC" "TTTACTTTTT" "TTAACTCTTG" "TTTACTTTTT" "TATTTGCTTT" "TTCTTATTTC" "TTTTCTTTTC" "TTTTTTCTAT" "TTTTTTTTTT" "TTTTTTTTTT"]}
-;; {:best-p 10.040892286282462, :best-ss ["ATATATATAT" "ATATATCAAA" "AAAAGACAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AAATGAAAAA" "AACAAAAAAA" "ATATATACAT" "AAAAGAAAAA" "AAATAAACAA" "AAAAAAAAAA" "AAAAGAAAAT" "AAAAAAAAAA" "AAAAGAAAAA" "AAGAAATAAT" "AAGAATAAAA" "AAATTAAAAT" "AAAAAAAAAA" "AACAAAAAAA" "AAAAAAAAAA" "AAATGAAAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AAAAAAAAAG" "ATAAATAAAT" "AAAAAAAAAA" "AAAAAAAATA" "AACTGTTTAA" "AAAAAAAAAT" "ATAAAAAAAA" "AAAAGATATA" "AAAAAAAAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AAATGAAATA" "ATAAATAAAT" "AAAAAAAATA" "AAATAAAAAG" "AACAAATAAA" "AAGAAAAAAT" "ATATATAAAA" "ATATATAAAG" "AAATATAAAT" "AAATTTAAAA" "ATATAAAAAA" "AAAAAAAAAG" "AAATAAATAA" "AAAAATTAAA" "AAAAAATAAA" "ATAAGCAATA" "AACAAAAAAA" "AAAAAAAAAG" "AACAATAAAA" "AAATACAATT" "AAAAATAAAA" "AAATACAAAA"]}
-;; {:best-p 10.021928335342775, :best-ss ["TAAATTAAAA" "AACATATATC" "AAAAAAAAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AATAAAAACA" "AAAAAAAACC" "TATATATATA" "AAAAGAAAAA" "AACAAATAAA" "AAAAAAAAAA" "AATAAAAAAA" "AAAAAAAAAA" "AAAAGAAAAA" "AATAGATAAC" "TATATATAAA" "TAAATTAAAA" "AAAAAAAAAA" "AAAAAATAAC" "AAAAAAAAAA" "TATAATAAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AATAAATACA" "AAAAAAAAAA" "AAAAAAAATA" "CAAAAATAGA" "TAAAAAAAAA" "AAAAGAAAAA" "AAAAGATATA" "AAAAAAAAAA" "AAAAAAAAAA" "CATATTAATA" "ATAAAAAATA" "TAAATAAATA" "AAAAAAAATA" "ATTAAAAAAA" "AAAAAAAAGA" "AAAAAATATC" "TATATAAAAC" "CATATATAAA" "AATATAAATA" "AAAATTTATA" "AAAAATTAAA" "AAAATAAATA" "AAAATAAATA" "AAAATTAAAA" "AAAAATAAAA" "TATAATAAGC" "AAAATAAACA" "AAAAAAAAAA" "AATATTAAAA" "TACAATTACA" "AAAAAAAACA" "AATAAAAACA"]}
 
-;; This faux-relative entropy approach is obviously not working well.
+
 ;; Going to try weighted discarding based on relative entropy now.
