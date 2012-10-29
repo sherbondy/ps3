@@ -96,7 +96,14 @@
 
 ; (to-cdf [1 2.0 1 1])
 
-
+(defn rand-cdf-idx
+  "takes a distribution and returns a random
+   index weighed by the cdf of the distribution.
+   The dist does NOT have to sum to one."
+  [prob-dist]
+  (let [prob-cdf   (to-cdf prob-dist)
+        rand-f     (rand (last prob-cdf))]
+    (count (filter #(< % rand-f) prob-cdf))))
 
 (defn rank-lmers [lmers profile & [bkgd]]
   (let [probs      (map #(lmer-prob % profile) lmers)
@@ -107,9 +114,7 @@
         prob-dist  (if min-prob
                      (map #(/ % min-prob) probs)
                      (repeat (count lmers) 1))
-        prob-cdf   (to-cdf prob-dist)
-        rand-f     (rand (last prob-cdf))
-        new-start  (count (filter #(< % rand-f) prob-cdf))]
+        new-start  (rand-cdf-idx prob-dist)]
     [new-start max-prob]))
 
 ;; this should yield a uniform dist over start positions
@@ -126,8 +131,23 @@
    (test-ranker)))
 
 
+
+(defn rel-profile-entropies [len ss bkgd]
+  (for [i (range (count ss))]
+    (let [new-ss      (remove-nth ss i)
+          profile     (make-profile new-ss len bases)]
+      (rel-entropy len profile bkgd))))
+
+(defn rand-entropy-idx
+  "return a random index from the distribution of
+   possible removal indices weighed by relative entropy
+   of the resulting profile"
+  [len ss bkgd]
+  (let [rel-entropy-dist (rel-profile-entropies len ss bkgd)]
+    (rand-cdf-idx rel-entropy-dist)))
+
 (defn gibbs-iter [seqs len ss bkgd]
-  (let [removed-idx (rand-int (count seqs))
+  (let [removed-idx (rand-entropy-idx len ss bkgd)
         removed-seq (nth seqs removed-idx)
         new-ss      (remove-nth ss removed-idx)
         profile     (make-profile new-ss len bases)
@@ -202,6 +222,8 @@
 ;; Moving on to data2:
 (test-data 2 10)
 
+(most-frequent-results (test-data 2 10))
+
 ;; a sampling of some of the best results
 (def test2-results [{:best-p 0.1285093120212051, :best-ss ["TCTGTCTGCT" "ACTGTCTACT" "AAAGTTTACC" "TCGGTCTACC" "TAAGTCTACT" "TCAGTCTACT" "TCTGTCTGCT" "TCTATCTACT" "TCGGTCTACT" "TCTGTCTACT"]}
 {:best-p 0.11989207715519623, :best-ss ["CTGTCTATTA" "CTGTCTACTA" "CTACCAGTAA" "CTATCTAATA" "CTGCTTAATA" "CAGTCTACTA" "CTGTCAACTA" "CTATCTACTA" "CTGTCAACTA" "CTGTCTACTA"]}
@@ -223,9 +245,11 @@
 ;; ["CAGTCTACTA" 3]
 ;; ["GTCTACTACT" 3]
 
+;; another round of results:
+;; (["CTGTCTACTA" 4] ["CTGTCAACTA" 3] ["GTCTACTACT" 3] ["AGAGCTCATC" 2] ["CAGTCTACTA" 2])
 
 
-;; Now simply trying to maximize P is insufficient.
+;; For 3 and 4 simply trying to maximize P is insufficient.
 ;; The results are skewed in favor of A/T repeats
 
 (test-data 3 10)
