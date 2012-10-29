@@ -1,5 +1,6 @@
 (ns gibbs
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str])
+  (:use [clojure.pprint :only [pprint]]))
 
 ;; Much thanks to Neil C. Jones and Pavel A. Pevzner
 ;; for writing An Introduction to Bioinformatics Algorithms
@@ -61,6 +62,8 @@
         sample-idx (rand-int (count seqs))
         new-ss (remove-nth ss sample-idx)
         profile (make-profile new-ss len bases)]
-    [sample-idx new-ss (aget profile 0 0)]))
+    (pprint new-ss)
+    (pprint profile)
+    [sample-idx new-ss]))
 
 (gibbs seqs 8)
