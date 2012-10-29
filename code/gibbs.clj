@@ -23,11 +23,13 @@
 
 ;; (remove-nth [0 1 2 3 4 5] 2)
 
+(defn l-mer [s i len]
+  (subs s i (+ i len)))
+
 (defn subseqs [seqs len]
   (vec (for [seq seqs]
-         (let [start (rand-int (- (count seq) len))
-               end   (+ start len)]
-           (subs seq start end)))))
+         (let [start (rand-int (- (count seq) len))]
+           (l-mer seq start len)))))
 
 ;; (str (get-in seqs [0 0]))
 
@@ -57,9 +59,6 @@
                       (get freqs (nth bases j) 0.0))
       )))
     arr))
-
-(defn l-mer [s i len]
-  (subs s i (+ i len)))
 
 (defn l-mers
   "Returns all subsequences of s with length len"
@@ -123,7 +122,7 @@
         added-ss    (l-mer removed-seq new-start len)]
     ;;(pprint new-ss)
     ;;(pprint profile)
-    (pprint max-prob)
+    ;;(pprint max-prob)
 
     ;; must return new ss in order!
     ;; ss must be a vector for this to work
@@ -137,7 +136,7 @@
 ;; without seeing an increase in max-prob
 
 (defn gibbs [seqs len cutoff]
-  (println "Beginning gibbs")
+  ;; (println "Beginning gibbs")
   ;; rounds = the number of rounds without improvement
   (loop [ss (subseqs seqs len) best 0.0 rounds 0]
     (let [[max-prob added-ss new-ss] (gibbs-iter seqs len ss)
@@ -152,3 +151,27 @@
       )))
 
 (gibbs seqs 8 50)
+
+(first (sort-by #(* -1 (first %))
+                (pmap (fn [_] (gibbs seqs 8 50)) (range 100))))
+
+
+(defn test-data [n]
+  (let [data-str (slurp (str "../data/data" n ".txt"))
+        lines    (str/split-lines data-str)]
+    (first (sort-by #(* -1 (first %))
+                    (pmap (fn [_] (gibbs lines 10 50))
+                          (range 20))))))
+
+(test-data 1)
+;; [1.0 "TTCGAATTCC" ["TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC"]]
+;; [0.00164794921875 "AACAATAT" ["AACAATAT" "ACCTCGCA" "CCGTACTG" "TAAACGAC" "ACACCCTG"]]
+;; [1.0 "AATTCGAATT" ["AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT"]]
+
+
+(test-data 2)
+;;[0.19182731573049971 "CTGTCTACTA" ["CTGTCTGCTA" "CTGTCTACTA" "CCGTCTTCTA" "CTGATTACTA" "TCGGCTACTA" "TCAGAGGGAG" "CTGTCAACTA" "CTATCTACTA" "CATATAACAA" "CTGTCTACTA"]]
+
+;; I need to implement relative entropy agains the background
+;; should be pretty straightforward.
+;; 
