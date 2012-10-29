@@ -1,0 +1,4 @@
+auto/
+repl-port
+*.log
+*.aux
