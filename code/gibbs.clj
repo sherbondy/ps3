@@ -126,14 +126,11 @@
    (test-ranker)))
 
 
-(defn gibbs-iter [seqs len ss & [bkgd]]
+(defn gibbs-iter [seqs len ss bkgd]
   (let [removed-idx (rand-int (count seqs))
         removed-seq (nth seqs removed-idx)
         new-ss      (remove-nth ss removed-idx)
         profile     (make-profile new-ss len bases)
-        entropy     (if bkgd
-                      (rel-entropy len profile bkgd)
-                      0.0)
         [new-start max-prob] (rank-lmers (l-mers removed-seq len)
                                          profile)
         added-ss    (l-mer removed-seq new-start len)]
@@ -141,50 +138,60 @@
     ;;(pprint profile)
     ;;(pprint max-prob)
 
-    ;; must return new ss in order!
+    ;; must return new-ss in order!
     ;; ss must be a vector for this to work
     [max-prob
-     entropy
      added-ss
      (reduce conj (conj (subvec ss 0 removed-idx)
                         added-ss)
              (subvec ss (inc removed-idx)))]))
 
+(def uniform-bases {\A 0.25 \T 0.25 \C 0.25 \G 0.25})
+
 ;; Idea: stop iterating once we've gone cutoff rounds
 ;; without seeing an increase in max-prob
+;; If no background is provided, a uniform base distribution is assumed
 
 (defn gibbs [seqs len cutoff & [bkgd]]
   ;; (println "Beginning gibbs")
   ;; rounds = the number of rounds without improvement
-  (loop [ss (subseqs seqs len) best 0.0 rounds 0 best-ss []]
-    (let [[max-prob entropy added-ss new-ss] (gibbs-iter seqs len ss bkgd)
-          metric                     (if bkgd entropy max-prob)
-          new-best                   (max metric best)
-          best-ss                    (if (= new-best metric) new-ss best-ss)
-          rounds                     (if (> new-best best)
-                                       0
-                                       (inc rounds))]
-      
-      (if (< rounds cutoff)
-        (recur new-ss new-best rounds best-ss)
-        {:best-p new-best :best-ss best-ss})
-      )))
+  (let [bkgd (if bkgd bkgd uniform-bases)]
+    (loop [ss (subseqs seqs len) best-prob 0.0 rounds 0 best-ss []]
+      (let [[max-prob added-ss new-ss] (gibbs-iter seqs len ss bkgd)
+            new-prob                   (max max-prob best-prob)
+            best-ss                    (if (= new-prob max-prob) new-ss best-ss)
+            rounds                     (if (> new-prob best-prob)
+                                         0
+                                         (inc rounds))]
+        
+        (if (< rounds cutoff)
+          (recur new-ss new-prob rounds best-ss)
+          {:best-p new-prob :best-ss best-ss})
+        ))))
 
 ;; (gibbs seqs 8 50)
 ;; {:best-p 0.005859375, :best-ss ["TAAACAAT" "AAATTTAC" "GTACTGTC" "TAAACGAC" "TTAACACC"]}
 
-;; (first (sort-by #(* -1 (:best-p %)) (pmap (fn [_] (gibbs seqs 8 50)) (range 100))))
-;; {:best-p 0.0087890625, :best-ss ["GTAAACAA" "CCTCGCAA" "GTACTGTC" "GTAAACGA" "CTTAACAC"]
+(defn most-frequent-results [test-results]
+  (take 5 (sort-by (fn [[k v]] (* -1 v))
+                   (frequencies (flatten (map #(:best-ss %) test-results))))))
 
 
-(defn test-data [n & [bkgd]]
-  (let [data-str (slurp (str "../data/data" n ".txt"))
+;; Repeat gibbs with reps seeds: returns the sorted results
+(defn n-gibbs [seqs len reps & [bkgd]]
+  (sort-by #(* -1 (:best-p %))
+             (pmap (fn [_] (gibbs seqs len 50 bkgd))
+                   (range reps))))
+
+;; (first (n-gibbs seqs 8 100))
+;; {:best-p 0.0098876953125, :best-ss ["GTAAACAA" "CCTCGCAA" "GTCAAGCG" "GTAAACGA" "CTTAACAC"]}
+
+(defn test-data [data-i len & [bkgd]]
+  (let [data-str (slurp (str "../data/data" data-i ".txt"))
         lines    (str/split-lines data-str)]
-    (sort-by #(* -1 (:best-p %))
-             (pmap (fn [_] (gibbs lines 10 50 bkgd))
-                   (range 20)))))
+    (n-gibbs lines len 20 bkgd)))
 
-(test-data 1)
+(test-data 1 10)
 ;; below are the top results from running test-data twice
 ;; {:best-p 1.0, :best-ss ["ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC"]}
 ;; {:best-p 1.0, :best-ss ["TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC"]}
@@ -193,8 +200,7 @@
 ;; From these results, we can infer a hidden motif of length 13: AATTCGAATTCCA
 ;; Let's make sure this still works using relative entropy as the scoring metric:
 
-(def uniform-bases {\A 0.25 \T 0.25 \C 0.25 \G 0.25})
-(test-data 1 uniform-bases)
+(test-data 1 10 uniform-bases)
 ;; Now :best-p corresponds to the entropy
 ;; {:best-p 20.0, :best-ss ["TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC" "TTCGAATTCC"]}
 ;; {:best-p 20.0, :best-ss ["ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC" "ATTCGAATTC"]}
@@ -202,7 +208,7 @@
 ;; Yep, we're still finding the best motif candidates!
 
 ;; Moving on to data2:
-(test-data 2)
+(test-data 2 10)
 
 ;; a sampling of some of the best results
 (def test2-results [{:best-p 0.1285093120212051, :best-ss ["TCTGTCTGCT" "ACTGTCTACT" "AAAGTTTACC" "TCGGTCTACC" "TAAGTCTACT" "TCAGTCTACT" "TCTGTCTGCT" "TCTATCTACT" "TCGGTCTACT" "TCTGTCTACT"]}
@@ -216,10 +222,6 @@
 {:best-p 0.045329567211914217, :best-ss ["AATCTGTCTA" "GAGCTGTCTA" "TATATGTATA" "TATCTGTCGA" "AAGTTCCGGT" "TATCTGTGTA" "TATCTGTCAA" "GATCTATCTA" "GCTCTGTAGA" "TATCTGTCTA"]}
 {:best-p 0.04371065432982424, :best-ss ["TCTGTCTGCT" "ACTGTCTACT" "ACTATCGACA" "TCTATCTAAT" "TCTATTTAGA" "ACTGACTAGA" "TCTGTCTGCT" "TCTATCTACT" "ACTTACTAAT" "TCTGTCTACT"]}])
 
-(defn most-frequent-results [test-results]
-  (take 5 (sort-by (fn [[k v]] (* -1 v))
-                   (frequencies (flatten (map #(:best-ss %) test-results))))))
-
 (most-frequent-results test2-results)
 
 ;; The 5 most commonly occuring motifs out of this sample are:
@@ -229,7 +231,7 @@
 ;; ["CAGTCTACTA" 3]
 ;; ["GTCTACTACT" 3]
 
-(test-data 2 uniform-bases)
+(test-data 2 10 uniform-bases)
 ;; Here are the top results from one round of test-data weighed by relative-entropy:
 
 (def test2-entropy-results
@@ -255,7 +257,7 @@
 ;; Now simply trying to maximize P is insufficient.
 ;; The results are skewed in favor of A/T repeats
 
-(test-data 3)
+(test-data 3 10)
 ;; {:best-p 0.13362902483849626, :best-ss ["AAAAGAAAAA" "AAAAAAAAAA" "AGAGGAAGAA" "AAAAAATAAA" "AAAAGAAAAT" "AACAGAAAAT" "AAAAATGAAA" "AAAAAAAAAA" "AGAAAAGAAA" "AAAAATTTAA" "AAAAAAAAAA" "AAAAAAAAAG" "AAAAGAGAAG" "AAAGAAAGAG" "AGAAGAAAAG" "AAAGATTATA" "AAAAATTTAA" "AAAAAAATAA" "AAAAAAAAAG" "AAAAATAGTA" "AAAAAAAATA" "AAAAAAAAAA" "AAAAAAAGAA" "AAAAGAATAA" "AAAAAAAAAA" "AAAAAAGAAG" "AAAAGAAAAA" "AAAAATATAA" "AAAGAAGGAA" "AGCAAAGAAT" "AAAAGAAAAA" "AAAAAAAAAA" "AGAAGAAAAA" "AAAAAAAAAA"]}
 ;; {:best-p 0.1148695910789486, :best-ss ["AAAAAAGAAA" "AAAAAAAAAA" "AAAGGAGGAA" "AAAAAATAAA" "AAAAAAAAAG" "TAAGAATAAA" "TAAAAATGAA" "AAAAAAAAAA" "TAAAGATAAA" "AAGTAATCCG" "TAAAAAAAAA" "AAAAACAAAA" "AAAAGAGAAG" "AAAGAAAGAG" "AGAAGAAAAG" "AAAGGGAGAA" "AAATGAAAAA" "AAAAAATAAA" "AAAAAAAAAG" "AAATAGTAAA" "AAAAAAAATA" "AAAAAAAAAA" "AAAAAAAGAA" "TGATAAAAAA" "AAAAAAAAAA" "AAAAAAGAAG" "AAAAAGAAAA" "AAGAAGAAAA" "AAAGAAGGAA" "AAAAACCAAA" "AAAAAGAAAA" "AAAAAAGAAA" "AAAAGAAGAA" "AAAAAAAAAA"]}
 ;; {:best-p 0.11364343620251935, :best-ss ["AGGAAAAAAT" "AAAAAAAAAA" "AGGAACAAAT" "AGAAAAAATA" "AAAAAAAAGA" "AAGAATAAAA" "AAAATGAAAT" "AAAAAAAAAA" "AGAAAAGAAA" "TGAAAAATTT" "AAAAAAATAA" "AAAATAATAA" "AGAAAAGAGA" "AAGAATATAA" "AGAATAAAAA" "AGAATAGTTA" "AAAATGAAAA" "AAAAAAATAA" "AAAAAAAAAA" "AAGAATAAAA" "AAAAAAAATA" "AAAAAAAAAA" "AAAATAAATA" "TAAAAAGAAT" "AAAAAAAAAA" "AAAAAGAAGA" "AAAAAGAAAA" "AAAAATATAA" "AAAATAGTAA" "AATATAAATA" "AAAAAGAAAA" "AAAAAAAAAA" "TAGAAAAAAA" "AAAAAAAAAA"]}
@@ -264,7 +266,7 @@
 ;; No good!
 
 (def low-gc-dist {\A 0.315 \T 0.315 \C 0.185 \G 0.185})
-(test-data 3 low-gc-dist)
+(test-data 3 10 low-gc-dist)
 ;; Still doesn't work well:
 ;; {:best-p 11.52886007980086, :best-ss ["AAAAAAAGAA" "AAAAAAAGAA" "ATGAGTGGAA" "AAAAATAGAA" "ATAAAAATAA" "AAGAATAAAA" "AAAAATGAAA" "AAAAAAAAAA" "AAGAAAAGAA" "AAAAATTTAA" "AAAAATAAAA" "AAAAAAAAAG" "AAGAAAAGAG" "AAGAATATAA" "AAGAAAAGAG" "AAGTAAGAAA" "AAAAATTTAA" "AAAAAATAAA" "AAAAAAAAAA" "AAGAATAAAA" "AAAAAAATAG" "AAAAAAAAAA" "AAAAAAAGAA" "AAAAGAATAA" "AAAAAAAAAA" "AAAAAAGAAG" "AAGAAAAAAG" "AAAAATATAA" "AAAAATTGAA" "ATAAATATAA" "AAAAAAGAAA" "AAAAAAAAAA" "AAAAGAAGAA" "AAAAAAAAAA"]}
 ;; {:best-p 11.371393724675492, :best-ss ["AAAAAAGAAA" "AAAAAAAAGA" "AAAGGATAGA" "AAAAAATAAA" "AAAAAAAAGA" "AGATAAGAAA" "AAAAAATTAA" "AGAAAAAAGA" "AGAAAAGAAA" "CCATGAAAAA" "AAAAAATAAA" "AGAAAAATAA" "AAAGAAAAGA" "AAAAGAAAGA" "AGAAAAGAGA" "AATGGAAAAA" "AAATGAAAAA" "AAAAAATAAA" "AAAAAAAAGA" "AGTAAAAAGA" "AAAACAAAAA" "AAAAGAATAA" "AAAAAAATAA" "AAAAGAATAA" "AAAAAAAAAA" "AGAAGAGAAA" "AAAGAAAAAA" "AGAAGAAAAA" "AAAGAAGGAA" "AAAGCAAAGA" "AAAAGAAAAA" "AAAAAAAAAA" "AAAGAAGAAA" "AAAAAAAAAA"]}
@@ -272,7 +274,7 @@
 ;; {:best-p 11.238083345541527, :best-ss ["AAAAGTAAAA" "AAAAAAAAAA" "TAGCGAAAAA" "TAGAGAAAAA" "ACAAAAAAAA" "AAGAATAAAA" "AAGAGAACAA" "AAAAAAAAAA" "AAGATAAAAA" "AAAAATTTAA" "AAAAAAAAAA" "TAAAAAAAAA" "TCAAAGAAAA" "AAGAATATAA" "CAGAATAAAA" "CAGAGAAAAA" "TATAATAAAA" "AAAATAAAAA" "AAAAAAAAAA" "AAGAATAAAA" "AAAAAAAATA" "AAAAAAAAAA" "AAGAAAAAAA" "AAGAATAAAA" "TAAAAAAAAA" "AAGAGAAATA" "AAAAGAAAAA" "AAGAAGAAAA" "AAACGTTTAA" "AAGAATACAA" "AAAAGAAAAA" "AAAAAAAAAA" "TAGAAAAAAA" "AAAAAAAAAA"]}
 
 
-(test-data 4 low-gc-dist)
+(test-data 4 10 low-gc-dist)
 ;; {:best-p 10.131471123522752, :best-ss ["TTTTTTTTTC" "TTTTTGTTTT" "TTTTTGCTTC" "TTTTTTTTTC" "TTTTTTTTTT" "TATTCTTTTT" "CTTTTTTTTT" "TTTTCTTTTT" "TACTCGTTTT" "TATTTTTTTT" "TTTTTTTTTT" "TTTTTACTTT" "CTTTTTTTTC" "TTCTTTTTTT" "TTTTTTGTTG" "CTTTTTCTAT" "TTTTTTTTAT" "CATTTATTTC" "TTTTTTTTTT" "TTATTTTTTT" "TTTTTTTTTT" "TACTTTCTTT" "CTTTTATTGT" "ATATCTTTTC" "TTTTCTTTTT" "TTTTTTCTTC" "TTCTTTCTAT" "TTTTTTCTTT" "TTTTCTGTTT" "TTTTTTTTTT" "CTATTTTTTC" "TTTTTTCTTC" "CTTTTTTTTC" "TTTTTATTTT" "TTTTTTCTTC" "TTTTCATTAT" "TATATTCTTG" "TACTTTCTTT" "TATTTTTTTC" "TTTTTTCTTC" "TTCACTCTTT" "TTTTCGGTTT" "TTTACTTTTG" "TATTTGCTTT" "TTTTTTTTTT" "CTTTTGTTTT" "CTATTGTTTC" "TTTACTTTTT" "TTAACTCTTG" "TTTACTTTTT" "TATTTGCTTT" "TTCTTATTTC" "TTTTCTTTTC" "TTTTTTCTAT" "TTTTTTTTTT" "TTTTTTTTTT"]}
 ;; {:best-p 10.040892286282462, :best-ss ["ATATATATAT" "ATATATCAAA" "AAAAGACAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AAATGAAAAA" "AACAAAAAAA" "ATATATACAT" "AAAAGAAAAA" "AAATAAACAA" "AAAAAAAAAA" "AAAAGAAAAT" "AAAAAAAAAA" "AAAAGAAAAA" "AAGAAATAAT" "AAGAATAAAA" "AAATTAAAAT" "AAAAAAAAAA" "AACAAAAAAA" "AAAAAAAAAA" "AAATGAAAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AAAAAAAAAG" "ATAAATAAAT" "AAAAAAAAAA" "AAAAAAAATA" "AACTGTTTAA" "AAAAAAAAAT" "ATAAAAAAAA" "AAAAGATATA" "AAAAAAAAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AAATGAAATA" "ATAAATAAAT" "AAAAAAAATA" "AAATAAAAAG" "AACAAATAAA" "AAGAAAAAAT" "ATATATAAAA" "ATATATAAAG" "AAATATAAAT" "AAATTTAAAA" "ATATAAAAAA" "AAAAAAAAAG" "AAATAAATAA" "AAAAATTAAA" "AAAAAATAAA" "ATAAGCAATA" "AACAAAAAAA" "AAAAAAAAAG" "AACAATAAAA" "AAATACAATT" "AAAAATAAAA" "AAATACAAAA"]}
 ;; {:best-p 10.021928335342775, :best-ss ["TAAATTAAAA" "AACATATATC" "AAAAAAAAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AATAAAAACA" "AAAAAAAACC" "TATATATATA" "AAAAGAAAAA" "AACAAATAAA" "AAAAAAAAAA" "AATAAAAAAA" "AAAAAAAAAA" "AAAAGAAAAA" "AATAGATAAC" "TATATATAAA" "TAAATTAAAA" "AAAAAAAAAA" "AAAAAATAAC" "AAAAAAAAAA" "TATAATAAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AAAAAAAAAA" "AATAAATACA" "AAAAAAAAAA" "AAAAAAAATA" "CAAAAATAGA" "TAAAAAAAAA" "AAAAGAAAAA" "AAAAGATATA" "AAAAAAAAAA" "AAAAAAAAAA" "CATATTAATA" "ATAAAAAATA" "TAAATAAATA" "AAAAAAAATA" "ATTAAAAAAA" "AAAAAAAAGA" "AAAAAATATC" "TATATAAAAC" "CATATATAAA" "AATATAAATA" "AAAATTTATA" "AAAAATTAAA" "AAAATAAATA" "AAAATAAATA" "AAAATTAAAA" "AAAAATAAAA" "TATAATAAGC" "AAAATAAACA" "AAAAAAAAAA" "AATATTAAAA" "TACAATTACA" "AAAAAAAACA" "AATAAAAACA"]}
