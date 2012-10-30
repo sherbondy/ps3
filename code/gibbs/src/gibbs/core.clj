@@ -1,11 +1,14 @@
-(ns gibbs
+(ns gibbs.core
   (:require [clojure.string :as str])
-  (:use [clojure.pprint :only [pprint]]))
+  (:use     [clojure.pprint :only [pprint]]))
 
 ;; Much thanks to Neil C. Jones and Pavel A. Pevzner
 ;; for writing An Introduction to Bioinformatics Algorithms
 
 ;; This is a Gibbs sampler for motif discovery
+
+(defn -main []
+  (println "Use lein repl to play with this."))
 
 (def seqs
   ["GTAAACAATATTTATAGC"
@@ -14,7 +17,7 @@
    "TGAGTAAACGACGTCCCA"
    "TACTTAACACCCTGTCAA"])
 
-(def bases "ATGC")
+(def nucs "ATGC")
 (def uniform-bases {\A 0.25  \T 0.25  \C 0.25  \G 0.25})  ; data 1 and 2
 (def low-gc-dist   {\A 0.315 \T 0.315 \C 0.185 \G 0.185}) ; data 3 and 4
 
@@ -56,13 +59,13 @@
         pseudo 0.01
         fcount (float (count v))]
     (into {}
-          (for [base bases]
+          (for [base nucs]
             (let [o-freq (get o-dist base 0.0)]
               {base (/ (+ o-freq pseudo)
                        (+ 1 (* pseudo fcount)))})))))
 
 ;; (pfreq-dist "TCCGGCCC")
-;; ((freq-dist "ATGCC") (nth bases 1))
+;; ((freq-dist "ATGCC") (nth nucs 1))
 ;; (reduce + (vals (pfreq-dist "ATGCC")))
 
 (defn make-profile [subseqs size bases]
@@ -84,7 +87,7 @@
     (l-mer s i len)))
     
 (defn bi [base]
-  (.indexOf bases (str base)))
+  (.indexOf nucs (str base)))
 
 ;; (bi \T) => 1
 
@@ -98,7 +101,7 @@
 
 (defn rel-entropy [len profile bkgd]
   (reduce + (for [j (range len)]
-              (reduce + (for [r bases]
+              (reduce + (for [r nucs]
                           (let [p-rj (get-in profile [(bi r) j])]
                             (* p-rj (log2 (/ p-rj (bkgd r))))))))))
                             
@@ -149,7 +152,7 @@
 (defn rel-profile-entropies [len ss bkgd]
   (for [i (range (count ss))]
     (let [new-ss      (remove-nth ss i)
-          profile     (make-profile new-ss len bases)]
+          profile     (make-profile new-ss len nucs)]
       (rel-entropy len profile bkgd))))
 
 (defn rand-entropy-idx
@@ -164,7 +167,7 @@
   (let [removed-idx (rand-entropy-idx len ss bkgd)
         removed-seq (nth seqs removed-idx)
         new-ss      (remove-nth ss removed-idx)
-        profile     (make-profile new-ss len bases)
+        profile     (make-profile new-ss len nucs)
         [new-start max-prob] (rank-lmers (l-mers removed-seq len)
                                          profile
                                          bkgd)
@@ -216,10 +219,10 @@
 ;; (first (n-gibbs seqs 8 100))
 ;; {:best-p 0.0098876953125, :best-ss ["GTAAACAA" "CCTCGCAA" "GTCAAGCG" "GTAAACGA" "CTTAACAC"]}
 
-(defn test-data [data-i len & [bkgd]]
-  (let [data-str (slurp (str "../data/data" data-i ".txt"))
+(defn test-data [data-i len reps & [bkgd]]
+  (let [data-str (slurp (str "../../data/data" data-i ".txt"))
         lines    (str/split-lines data-str)]
-    (n-gibbs lines len 50 bkgd)))
+    (n-gibbs lines len reps bkgd)))
 
 
 (defn most-frequent-results [test-results & [n]]
@@ -227,7 +230,7 @@
     (take n (sort-by (fn [[k v]] (* -1 v))
                      (frequencies (flatten (map #(:best-ss %) test-results)))))))
 
-;; (test-data 1 10)
+;; (test-data 1 10 50)
 
 ;; below are the top results from running test-data twice
 ;; {:best-p 0.4666044141799745, :best-ss ["AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT" "AATTCGAATT"]}
@@ -238,9 +241,9 @@
 ;;
 
 ;; Moving on to data2:
-;; (test-data 2 10)
+;; (test-data 2 10 50)
 
-;; (most-frequent-results (test-data 2 10))
+;; (most-frequent-results (test-data 2 10 50))
 
 ;; a sampling of some of the best results
 (def test2-results
@@ -262,8 +265,8 @@
 ;; For 3 and 4 simply trying to maximize P is insufficient.
 ;; The results are skewed in favor of A/T repeats
 
-;; (most-frequent-results (test-data 3 10 low-gc-dist))
-;; (test-data 3 10 low-gc-dist)
+;; (most-frequent-results (test-data 3 10 50 low-gc-dist))
+;; (test-data 3 10 50 low-gc-dist)
 
 ;; Still doesn't work very well:
 ;; {:best-p 0.009131122250906587, :best-ss ["AAAAGTAAAA" "AAAAAAAAGA" "AAAAGGAGGA" "AAAAAATAAA" "AAAAAAAAGA" "AATAAAAAAC" "AAAAAAATTA" "AAAGAAAAAA" "AAGAAAAGAA" "AAAAATTTAA" "AAAAAAAAAA" "AATAAAAAAA" "AAAGAAAAGA" "AAAAGAAAGA" "TAGAAGAAAA" "CAGAGAAAAA" "AAAATGAAAA" "AAAAATAAAA" "AATAAAATAA" "AATAGTAAAA" "AAAAAAAATA" "AAAAAAAAAA" "AAGAAAAAAA" "AAAAAGAATA" "AAAAAAAAAA" "AAAAAGAAGA" "AAAAAGAAAA" "GAAAAAAATA" "AAAATAAGTA" "AAGCAAAGAA" "AAAAAGAAAA" "AAAAAAAAGA" "TAGAAAAAAA" "AAAAAAAAAA"]}
@@ -278,7 +281,7 @@
 
 ;; Out of these, only "TTGTATATAT" is likely to be a genuine motif.
 
-;; (most-frequent-results (test-data 4 10 low-gc-dist))
+;; (most-frequent-results (test-data 4 10 50 low-gc-dist))
 
 ;; ["AAAAAAAAAA" 34] ["TTTTTTTTTT" 21] ["AAAAAAAAAT" 5] ["AACAAAAAAA" 5] ["AAAAATTAAA" 4]
 
