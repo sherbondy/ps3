@@ -1,17 +1,35 @@
 \documentclass{article}  
 \usepackage{amsmath}
+\usepackage{enumerate}
 \author{Ethan Sherbondy}
 \date{\today}
 \title{Problem Set 3: Networks and Gene Regulation}
  
 \begin{document}  
 \maketitle  
-\section{Bayesian Decision Theory}  
+\section{Bayesian Decision Theory}
+
+\begin{enumerate}[(a)]
+\item The expected loss is the sum of the likelihoods all possible labelings of the data given that the actual class is $k$ times the corresponding loss value for each (mis)classification. Symbolically, this can be expressed as:
+\begin{align}
+E_{k}[L] &=&  \sum_{j} L_{kj} P(j|d) \\
+         &=& \sum_{j} L_{kj} \frac{P(d|j)P(j)}{P(d)}
+\end{align}
+
+\item If the loss matrix is $L_{kj} = 1 - I_{kj}$, then:
+$E_{k}[L] = \sum_{j} \frac{P(d|j)P(j)}{P(d)}$, where $j \neq k$.
+This is the sum of the conditional probilities for each class.
+
+\item The loss matrix in part (b) amounts to the simple Bayes classifier: 
+      you just select for the most likely class (highest P) 
+      since that always corresponds to the minimum expected loss.
+
+\end{enumerate}
 
 \section{Gibbs Sampling For Motif Discovery}
 
 My Gibbs sampling algorithm is modeled after the algorithm
-described in Chapter 12.2 of \textit{An Introduction to Bioinformatcs Algorithms}. It also makes use of relative entropy to weigh the random choice of a starting position (step 5 as described on page 413). I make use of pseudocounts for my profile matrix. I do \textbf{not} use the log-of-odds when calculating my l-mer probabilities, as Clojure handles extremely small decimal numbers fairly well.
+described in Chapter 12.2 of \textit{An Introduction to Bioinformatcs Algorithms}. It also makes use of relative entropy to weigh the random choice of a removal sequence (step 2 as described on page 413). I make use of pseudocounts for my profile matrix. I do not use the log-of-odds when calculating my l-mer probabilities, as Clojure handles extremely small decimal numbers fairly well.
 
 My metric for convergence is a value referred to in the code as the \textit{cutoff}. For simplicity, I say the algorithm has converged when cutoff rounds go by without an increase in the maximum-probability l-mer. I've arbitrarily set the cutoff to be 20 rounds in the current implementation, but it can easily be adjusted. If I had more time, it would be fun to explore using simulated annealing instead of my naive approach.
 
