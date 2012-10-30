@@ -205,12 +205,6 @@
 ;; (gibbs seqs 8 50)
 ;; {:best-p 0.005859375, :best-ss ["TAAACAAT" "AAATTTAC" "GTACTGTC" "TAAACGAC" "TTAACACC"]}
 
-(defn most-frequent-results [test-results & [n]]
-  (let [n (if n n 5)]
-    (take n (sort-by (fn [[k v]] (* -1 v))
-                     (frequencies (flatten (map #(:best-ss %) test-results)))))))
-
-
 ;; Repeat gibbs with reps seeds: returns the sorted results
 (defn n-gibbs [seqs len reps & [bkgd]]
   (sort-by #(* -1 (:best-p %))
@@ -225,7 +219,13 @@
 (defn test-data [data-i len & [bkgd]]
   (let [data-str (slurp (str "../data/data" data-i ".txt"))
         lines    (str/split-lines data-str)]
-    (n-gibbs lines len 10 bkgd)))
+    (n-gibbs lines len 50 bkgd)))
+
+
+(defn most-frequent-results [test-results & [n]]
+  (let [n (if n n 5)]
+    (take n (sort-by (fn [[k v]] (* -1 v))
+                     (frequencies (flatten (map #(:best-ss %) test-results)))))))
 
 ;; (test-data 1 10)
 
@@ -262,6 +262,7 @@
 ;; For 3 and 4 simply trying to maximize P is insufficient.
 ;; The results are skewed in favor of A/T repeats
 
+;; (most-frequent-results (test-data 3 10 low-gc-dist))
 ;; (test-data 3 10 low-gc-dist)
 
 ;; Still doesn't work very well:

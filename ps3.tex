@@ -17,9 +17,21 @@ My metric for convergence is a value referred to in the code as the \textit{cuto
 
 Despite using relative entropy, my solution seems to perform poorly when the AT/GC ratio is non-uniform. This suggests to me that I am not making proper use of the relative-entropy equation.
 
-Regardless, here are my results:
+Regardless, below is a table summarizing the most frequent 10-mer motifs discovered across the four datasets provided:
 
-For \textit{data1.txt}, the most frequent motifs discovered were:
-``AATTCGAATT'', ``CGAATTCGAA'', ``TTCGAATTCC''
+\begin{center}
+  \begin{tabular}{ | l | l | l | l | l | l }
+    \hline
+    Data 1     & Data 2      & Data 3      & Data 4 \\ \hline
+    ATTCGAATTC & GTCTACTACT  & AAAAAAAAAA  & AAAAAAAAAA \\ \hline
+    TCGAATTCCC & CTACTACTCA  & TTTTTTTTTT  & AACAAAAAAA \\ \hline
+    TTCGAATTCC & TCATATAACA  & AAAAAAAAGA  & TTTTTTTTTT \\ \hline
+    CGAATTCGAA & CTGTCTACTA  & AAAAAAAACA  & AAAAAAAAAT \\ \hline
+    AATTCGAATT & TCTCTTAAGA  & TTGTATATAT  & ATAAATAAAT \\
+    \hline
+  \end{tabular}
+\end{center}
+
+As you can see, the results for data 3 and 4 are likely not actual motifs.
 
 \end{document}
